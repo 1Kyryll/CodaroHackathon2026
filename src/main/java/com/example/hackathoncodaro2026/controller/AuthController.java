@@ -3,6 +3,8 @@ package com.example.hackathoncodaro2026.controller;
 import com.example.hackathoncodaro2026.dto.LoginRequest;
 import com.example.hackathoncodaro2026.dto.RegistrationRequest;
 import com.example.hackathoncodaro2026.exception.DuplicateUserException;
+import com.example.hackathoncodaro2026.model.enums.Role;
+import com.example.hackathoncodaro2026.service.AuditLogService;
 import com.example.hackathoncodaro2026.service.UserService;
 import jakarta.validation.Valid;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
@@ -15,13 +17,17 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import java.util.Map;
+
 @Controller
 public class AuthController {
 
     private final UserService userService;
+    private final AuditLogService auditLogService;
 
-    public AuthController(UserService userService) {
+    public AuthController(UserService userService, AuditLogService auditLogService) {
         this.userService = userService;
+        this.auditLogService = auditLogService;
     }
 
     @GetMapping("/login")
@@ -59,10 +65,28 @@ public class AuthController {
         if (!bindingResult.hasFieldErrors("username")
                 && userService.existsByUsername(registrationRequest.getUsername())) {
             bindingResult.rejectValue("username", "duplicate", "This username is already taken");
+            auditLogService.record(
+                    "REGISTER",
+                    auditLogService.sanitize(registrationRequest.getUsername()),
+                    Role.USER.name(),
+                    "USER",
+                    null,
+                    "REJECTED",
+                    Map.of("reason", "DUPLICATE", "field", "username")
+            );
         }
         if (!bindingResult.hasFieldErrors("email")
                 && userService.existsByEmail(registrationRequest.getEmail())) {
             bindingResult.rejectValue("email", "duplicate", "This email is already registered");
+            auditLogService.record(
+                    "REGISTER",
+                    auditLogService.sanitize(registrationRequest.getUsername()),
+                    Role.USER.name(),
+                    "USER",
+                    null,
+                    "REJECTED",
+                    Map.of("reason", "DUPLICATE", "field", "email")
+            );
         }
         if (bindingResult.hasErrors()) {
             return "register";

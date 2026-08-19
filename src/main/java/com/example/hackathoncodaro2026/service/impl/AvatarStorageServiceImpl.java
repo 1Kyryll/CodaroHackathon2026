@@ -3,6 +3,7 @@ package com.example.hackathoncodaro2026.service.impl;
 import com.example.hackathoncodaro2026.exception.ReservationException;
 import com.example.hackathoncodaro2026.model.User;
 import com.example.hackathoncodaro2026.repository.UserRepository;
+import com.example.hackathoncodaro2026.service.AuditLogService;
 import com.example.hackathoncodaro2026.service.AvatarStorageService;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.FileSystemResource;
@@ -17,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -40,9 +42,11 @@ public class AvatarStorageServiceImpl implements AvatarStorageService {
 
     private final Path root = Path.of("data", "avatars");
     private final UserRepository userRepository;
+    private final AuditLogService auditLogService;
 
-    public AvatarStorageServiceImpl(UserRepository userRepository) {
+    public AvatarStorageServiceImpl(UserRepository userRepository, AuditLogService auditLogService) {
         this.userRepository = userRepository;
+        this.auditLogService = auditLogService;
     }
 
     @Override
@@ -56,9 +60,11 @@ public class AvatarStorageServiceImpl implements AvatarStorageService {
         }
         String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase(Locale.ROOT);
         if (!ALLOWED_TYPES.contains(contentType)) {
+            auditLogService.record(user, "AVATAR_UPLOAD", "USER", user.getId(), "REJECTED", Map.of("reason", "UNSUPPORTED_TYPE"));
             throw new ReservationException("Use a JPG, PNG, WEBP, or GIF photo");
         }
         if (file.getSize() > MAX_BYTES) {
+            auditLogService.record(user, "AVATAR_UPLOAD", "USER", user.getId(), "REJECTED", Map.of("reason", "TOO_LARGE"));
             throw new ReservationException("Photo must be 1 MB or smaller");
         }
         try {
@@ -67,6 +73,7 @@ public class AvatarStorageServiceImpl implements AvatarStorageService {
             String filename = user.getId() + "." + extension;
             Path target = root.resolve(filename).normalize();
             if (!target.startsWith(root.toAbsolutePath().normalize()) && !target.startsWith(root.normalize())) {
+                auditLogService.record(user, "AVATAR_UPLOAD", "USER", user.getId(), "REJECTED", Map.of("reason", "PATH"));
                 throw new ReservationException("That photo could not be saved");
             }
             if (user.getAvatarFilename() != null && !user.getAvatarFilename().isBlank()
@@ -79,7 +86,12 @@ public class AvatarStorageServiceImpl implements AvatarStorageService {
             managed.setAvatarFilename(filename);
             userRepository.save(managed);
             user.setAvatarFilename(filename);
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("changed", true);
+            details.put("type", extension);
+            auditLogService.record(user, "AVATAR_UPLOAD", "USER", user.getId(), "SUCCESS", details);
         } catch (IOException ex) {
+            auditLogService.record(user, "AVATAR_UPLOAD", "USER", user.getId(), "REJECTED", Map.of("reason", "IO_ERROR"));
             throw new ReservationException("That photo could not be saved");
         }
     }

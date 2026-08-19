@@ -10,6 +10,7 @@ import com.example.hackathoncodaro2026.model.enums.ReservationStatus;
 import com.example.hackathoncodaro2026.model.enums.Role;
 import com.example.hackathoncodaro2026.repository.CoachRatingRepository;
 import com.example.hackathoncodaro2026.repository.ReservationRepository;
+import com.example.hackathoncodaro2026.service.AuditLogService;
 import com.example.hackathoncodaro2026.service.CoachRatingService;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -32,13 +33,16 @@ public class CoachRatingServiceImpl implements CoachRatingService {
 
     private final CoachRatingRepository coachRatingRepository;
     private final ReservationRepository reservationRepository;
+    private final AuditLogService auditLogService;
 
     public CoachRatingServiceImpl(
             CoachRatingRepository coachRatingRepository,
-            ReservationRepository reservationRepository
+            ReservationRepository reservationRepository,
+            AuditLogService auditLogService
     ) {
         this.coachRatingRepository = coachRatingRepository;
         this.reservationRepository = reservationRepository;
+        this.auditLogService = auditLogService;
     }
 
     @Override
@@ -79,7 +83,14 @@ public class CoachRatingServiceImpl implements CoachRatingService {
         rating.setStars(request.getStars());
         rating.setReview(review);
         try {
-            return coachRatingRepository.saveAndFlush(rating);
+            CoachRating saved = coachRatingRepository.saveAndFlush(rating);
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("stars", saved.getStars());
+            details.put("reviewPresent", saved.getReview() != null && !saved.getReview().isBlank());
+            details.put("coachId", reservation.getCoach().getId());
+            details.put("reservationId", reservation.getId());
+            auditLogService.record(author, "RATING_CREATE", "COACH_RATING", saved.getId(), "SUCCESS", details);
+            return saved;
         } catch (DataIntegrityViolationException ex) {
             throw new ReservationException("You already rated this booking");
         }

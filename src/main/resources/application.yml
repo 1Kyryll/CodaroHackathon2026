@@ -56,8 +56,11 @@ app:
   browser:
     auto-open: true
     executable: firefox
+  logging:
+    dir: ${LOG_PATH:./logs}
 
 logging:
   level:
+    com.example.hackathoncodaro2026: INFO
     org.hibernate.SQL: debug
     org.springframework.security: info

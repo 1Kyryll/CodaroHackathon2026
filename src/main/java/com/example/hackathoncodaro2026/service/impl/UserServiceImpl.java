@@ -10,12 +10,14 @@ import com.example.hackathoncodaro2026.model.enums.ResourceType;
 import com.example.hackathoncodaro2026.model.enums.Role;
 import com.example.hackathoncodaro2026.repository.UserRepository;
 import com.example.hackathoncodaro2026.repository.UserSportLevelRepository;
+import com.example.hackathoncodaro2026.service.AuditLogService;
 import com.example.hackathoncodaro2026.service.SportSkillLevelCatalog;
 import com.example.hackathoncodaro2026.service.UserService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -28,17 +30,20 @@ public class UserServiceImpl implements UserService {
     private final UserSportLevelRepository userSportLevelRepository;
     private final PasswordEncoder passwordEncoder;
     private final SportSkillLevelCatalog sportSkillLevelCatalog;
+    private final AuditLogService auditLogService;
 
     public UserServiceImpl(
             UserRepository userRepository,
             UserSportLevelRepository userSportLevelRepository,
             PasswordEncoder passwordEncoder,
-            SportSkillLevelCatalog sportSkillLevelCatalog
+            SportSkillLevelCatalog sportSkillLevelCatalog,
+            AuditLogService auditLogService
     ) {
         this.userRepository = userRepository;
         this.userSportLevelRepository = userSportLevelRepository;
         this.passwordEncoder = passwordEncoder;
         this.sportSkillLevelCatalog = sportSkillLevelCatalog;
+        this.auditLogService = auditLogService;
     }
 
     @Override
@@ -47,9 +52,27 @@ public class UserServiceImpl implements UserService {
         String username = request.getUsername().trim();
         String email = request.getEmail().trim().toLowerCase(Locale.ROOT);
         if (userRepository.existsByUsernameIgnoreCase(username)) {
+            auditLogService.record(
+                    "REGISTER",
+                    username,
+                    Role.USER.name(),
+                    "USER",
+                    null,
+                    "REJECTED",
+                    Map.of("reason", "DUPLICATE", "field", "username")
+            );
             throw new DuplicateUserException("username", "This username is already taken");
         }
         if (userRepository.existsByEmailIgnoreCase(email)) {
+            auditLogService.record(
+                    "REGISTER",
+                    username,
+                    Role.USER.name(),
+                    "USER",
+                    null,
+                    "REJECTED",
+                    Map.of("reason", "DUPLICATE", "field", "email")
+            );
             throw new DuplicateUserException("email", "This email is already registered");
         }
         User user = new User();
@@ -62,7 +85,17 @@ public class UserServiceImpl implements UserService {
         }
         user.setRole(Role.USER);
         user.setEnabled(true);
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        auditLogService.record(
+                "REGISTER",
+                saved.getUsername(),
+                Role.USER.name(),
+                "USER",
+                saved.getId(),
+                "SUCCESS",
+                Map.of()
+        );
+        return saved;
     }
 
     @Override
@@ -72,6 +105,14 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new DuplicateUserException("username", "Signed-in user was not found"));
         String email = request.getEmail().trim().toLowerCase(Locale.ROOT);
         if (userRepository.existsByEmailIgnoreCaseAndIdNot(email, managed.getId())) {
+            auditLogService.record(
+                    managed,
+                    "PROFILE_UPDATE",
+                    "USER",
+                    managed.getId(),
+                    "REJECTED",
+                    Map.of("reason", "DUPLICATE", "field", "email")
+            );
             throw new DuplicateUserException("email", "This email is already registered");
         }
         managed.setFullName(request.getFullName().trim());
@@ -81,15 +122,43 @@ public class UserServiceImpl implements UserService {
         } else {
             managed.setPhone(null);
         }
+        boolean passwordChanged = false;
         if (request.getNewPassword() != null && !request.getNewPassword().isBlank()) {
             if (request.getCurrentPassword() == null
                     || !passwordEncoder.matches(request.getCurrentPassword(), managed.getPassword())) {
+                auditLogService.record(
+                        managed,
+                        "PASSWORD_CHANGE",
+                        "USER",
+                        managed.getId(),
+                        "FAILURE",
+                        Map.of("reason", "CURRENT_PASSWORD_INVALID")
+                );
                 throw new DuplicateUserException("currentPassword", "Current password is incorrect");
             }
             managed.setPassword(passwordEncoder.encode(request.getNewPassword()));
+            passwordChanged = true;
         }
         User saved = userRepository.save(managed);
         saveSportLevels(saved, request.getSportLevels());
+        auditLogService.record(
+                saved,
+                "PROFILE_UPDATE",
+                "USER",
+                saved.getId(),
+                "SUCCESS",
+                Map.of("passwordChanged", passwordChanged)
+        );
+        if (passwordChanged) {
+            auditLogService.record(
+                    saved,
+                    "PASSWORD_CHANGE",
+                    "USER",
+                    saved.getId(),
+                    "SUCCESS",
+                    Map.of("changed", true)
+            );
+        }
         return saved;
     }
 
@@ -115,9 +184,11 @@ public class UserServiceImpl implements UserService {
         String username = request.getUsername().trim();
         String email = request.getEmail().trim().toLowerCase(Locale.ROOT);
         if (userRepository.existsByUsernameIgnoreCase(username)) {
+            auditStaffRejected(username, role, "username");
             throw new DuplicateUserException("username", "This username is already taken");
         }
         if (userRepository.existsByEmailIgnoreCase(email)) {
+            auditStaffRejected(username, role, "email");
             throw new DuplicateUserException("email", "This email is already registered");
         }
         User user = new User();
@@ -130,7 +201,37 @@ public class UserServiceImpl implements UserService {
         }
         user.setRole(role);
         user.setEnabled(true);
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("createdUsername", saved.getUsername());
+        details.put("createdRole", saved.getRole().name());
+        auditLogService.record(
+                "STAFF_CREATE",
+                auditLogService.currentActor(),
+                auditLogService.currentRole(),
+                "USER",
+                saved.getId(),
+                "SUCCESS",
+                details
+        );
+        return saved;
+    }
+
+    private void auditStaffRejected(String username, Role role, String field) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("reason", "DUPLICATE");
+        details.put("field", field);
+        details.put("createdUsername", username);
+        details.put("createdRole", role == null ? "" : role.name());
+        auditLogService.record(
+                "STAFF_CREATE",
+                auditLogService.currentActor(),
+                auditLogService.currentRole(),
+                "USER",
+                null,
+                "REJECTED",
+                details
+        );
     }
 
     @Override

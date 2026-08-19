@@ -76,13 +76,15 @@ class HackathonCodaro2026ApplicationTests {
     @Test
     void adminCanLogIn() throws Exception {
         mockMvc.perform(formLogin().user("admin").password("Admin123!"))
-                .andExpect(authenticated().withUsername("admin"));
+                .andExpect(authenticated().withUsername("admin"))
+                .andExpect(redirectedUrl("/"));
     }
 
     @Test
     void invalidLoginStaysAnonymous() throws Exception {
         mockMvc.perform(formLogin().user("admin").password("wrong-password"))
-                .andExpect(unauthenticated());
+                .andExpect(unauthenticated())
+                .andExpect(redirectedUrl("/login?error"));
     }
 
     @Test
@@ -134,7 +136,8 @@ class HackathonCodaro2026ApplicationTests {
     @Test
     void managerCanLogIn() throws Exception {
         mockMvc.perform(formLogin().user("manager").password("Manager123!"))
-                .andExpect(authenticated().withUsername("manager"));
+                .andExpect(authenticated().withUsername("manager"))
+                .andExpect(redirectedUrl("/"));
     }
 
     @Test

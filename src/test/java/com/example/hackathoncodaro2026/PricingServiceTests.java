@@ -60,12 +60,53 @@ class PricingServiceTests {
         assertThat(gym.partySizeLabel(20, ReservationKind.LESSON)).isEqualTo("20");
     }
 
+    @Test
+    void weekdayMorningRatesMatchEachSportBase() {
+        LocalDate monday = LocalDate.of(2026, 8, 17);
+        LocalTime ten = LocalTime.of(10, 0);
+        for (ResourceType type : ResourceType.values()) {
+            SportResource resource = resource(type);
+            assertThat(pricingService.hourlyRate(resource, monday, ten))
+                    .isEqualByComparingTo(type.getBaseHourlyPrice());
+        }
+    }
+
+    @Test
+    void eveningAndWeekendMultipliersStackWithHalfUpScale() {
+        SportResource football = resource(ResourceType.FOOTBALL);
+        LocalDate monday = LocalDate.of(2026, 8, 17);
+        LocalDate saturday = LocalDate.of(2026, 8, 22);
+        assertThat(pricingService.hourlyRate(football, monday, LocalTime.of(10, 0))).isEqualByComparingTo("160.00");
+        assertThat(pricingService.hourlyRate(football, monday, LocalTime.of(17, 0))).isEqualByComparingTo("216.00");
+        assertThat(pricingService.hourlyRate(football, saturday, LocalTime.of(10, 0))).isEqualByComparingTo("200.00");
+        assertThat(pricingService.hourlyRate(football, saturday, LocalTime.of(18, 0))).isEqualByComparingTo("270.00");
+    }
+
+    @Test
+    void gymLessonUsesFixedLessonBaseThenMultipliers() {
+        SportResource gym = resource(ResourceType.GYM);
+        gym.setLessonHourlyPrice(new BigDecimal("90.00"));
+        LocalDate monday = LocalDate.of(2026, 8, 17);
+        LocalDate saturday = LocalDate.of(2026, 8, 22);
+        assertThat(pricingService.hourlyRate(gym, monday, LocalTime.of(10, 0), ReservationKind.INDIVIDUAL))
+                .isEqualByComparingTo("30.00");
+        assertThat(pricingService.hourlyRate(gym, monday, LocalTime.of(10, 0), ReservationKind.LESSON))
+                .isEqualByComparingTo("90.00");
+        assertThat(pricingService.hourlyRate(gym, saturday, LocalTime.of(18, 0), ReservationKind.LESSON))
+                .isEqualByComparingTo("151.88");
+    }
+
     private SportResource tennis() {
+        return resource(ResourceType.TENNIS);
+    }
+
+    private SportResource resource(ResourceType type) {
         SportResource resource = new SportResource();
-        resource.setType(ResourceType.TENNIS);
-        resource.setBaseHourlyPrice(ResourceType.TENNIS.getBaseHourlyPrice());
-        resource.setMinPartySize(ResourceType.TENNIS.getMinPartySize());
-        resource.setMaxPartySize(ResourceType.TENNIS.getMaxPartySize());
+        resource.setType(type);
+        resource.setBaseHourlyPrice(type.getBaseHourlyPrice());
+        resource.setLessonHourlyPrice(type.getLessonHourlyPrice());
+        resource.setMinPartySize(type.getMinPartySize());
+        resource.setMaxPartySize(type.getMaxPartySize());
         return resource;
     }
 }

@@ -9,6 +9,7 @@ import com.example.hackathoncodaro2026.model.User;
 import com.example.hackathoncodaro2026.model.enums.ResourceType;
 import com.example.hackathoncodaro2026.model.enums.Role;
 import com.example.hackathoncodaro2026.repository.CoachOfferingRepository;
+import com.example.hackathoncodaro2026.service.AuditLogService;
 import com.example.hackathoncodaro2026.service.CoachOfferingService;
 import com.example.hackathoncodaro2026.service.CoachRatingService;
 import com.example.hackathoncodaro2026.service.SportSkillLevelCatalog;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -31,15 +33,18 @@ public class CoachOfferingServiceImpl implements CoachOfferingService {
     private final CoachOfferingRepository coachOfferingRepository;
     private final SportSkillLevelCatalog sportSkillLevelCatalog;
     private final CoachRatingService coachRatingService;
+    private final AuditLogService auditLogService;
 
     public CoachOfferingServiceImpl(
             CoachOfferingRepository coachOfferingRepository,
             SportSkillLevelCatalog sportSkillLevelCatalog,
-            CoachRatingService coachRatingService
+            CoachRatingService coachRatingService,
+            AuditLogService auditLogService
     ) {
         this.coachOfferingRepository = coachOfferingRepository;
         this.sportSkillLevelCatalog = sportSkillLevelCatalog;
         this.coachRatingService = coachRatingService;
+        this.auditLogService = auditLogService;
     }
 
     @Override
@@ -95,7 +100,20 @@ public class CoachOfferingServiceImpl implements CoachOfferingService {
         offering.setSportType(request.getSportType());
         offering.setLevels(new LinkedHashSet<>(levels));
         offering.setPricePerHour(request.getPricePerHour().setScale(2, RoundingMode.HALF_UP));
-        return coachOfferingRepository.save(offering);
+        CoachOffering saved = coachOfferingRepository.save(offering);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("sport", saved.getSportType());
+        details.put("levels", String.join(",", saved.getLevels()));
+        details.put("pricePerHour", saved.getPricePerHour());
+        auditLogService.record(
+                coach,
+                request.getId() == null ? "OFFERING_CREATE" : "OFFERING_UPDATE",
+                "COACH_OFFERING",
+                saved.getId(),
+                "SUCCESS",
+                details
+        );
+        return saved;
     }
 
     @Override
@@ -103,7 +121,13 @@ public class CoachOfferingServiceImpl implements CoachOfferingService {
     public void delete(User coach, Long offeringId) {
         CoachOffering offering = coachOfferingRepository.findByIdAndCoach_Id(offeringId, coach.getId())
                 .orElseThrow(() -> new ReservationException("That offering could not be found"));
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("sport", offering.getSportType());
+        details.put("levels", offering.getLevels() == null ? "" : String.join(",", offering.getLevels()));
+        details.put("pricePerHour", offering.getPricePerHour());
+        Long id = offering.getId();
         coachOfferingRepository.delete(offering);
+        auditLogService.record(coach, "OFFERING_DELETE", "COACH_OFFERING", id, "SUCCESS", details);
     }
 
     @Override

@@ -194,9 +194,11 @@ src/main/resources/
   templates/      Thymeleaf (home, facilities, resources, reservations, manager, admin, coach, profile)
   static/         css/, js/, images/
   application.yml
+  logback-spring.xml
 
 src/test/java/... and src/test/resources/application.yml
 data/             local H2 file DB and uploaded avatars (not for git)
+logs/             rolling application logs (not for git)
 ```
 
 Gradle wrapper lives in `gradle/wrapper/` plus `gradlew` / `gradlew.bat`. Those **should** be committed.
@@ -287,6 +289,33 @@ In the H2 console, use the same JDBC URL, username, and password as above.
 
 ---
 
+## File logging
+
+Courtly writes **files on disk**, not an H2 audit table. Files stay readable after the process stops, survive `create-drop`, and still capture startup or database failures. Domain data stays in H2.
+
+Override the directory with `LOG_PATH` or `app.logging.dir` (default `./logs`):
+
+| File | What it contains | Retention |
+|------|------------------|-----------|
+| `logs/courtly.log` | INFO and above (HTTP access, app, schema repair) | Daily gzip archives, 30 days, about 1 GB cap |
+| `logs/courtly-error.log` | WARN and above | Daily gzip archives, 30 days, about 1 GB cap |
+| `logs/courtly-audit.log` | Business and security events only (`AUDIT` logger) | Daily gzip archives, 90 days, about 2 GB cap |
+
+Lines include an ISO timestamp, level, thread, `requestId` (also returned as `X-Request-ID`), logger, and message. Tests use console logging only and do not write these files.
+
+Read while the app is off (PowerShell, from the project root):
+
+```powershell
+Get-Content .\logs\courtly-audit.log -Tail 100
+Get-Content .\logs\courtly-error.log -Tail 100
+Get-Content .\logs\courtly.log -Tail 100
+Get-ChildItem .\logs\*.log.gz
+```
+
+**Do not commit** `./logs/` or `*.log`. They are in `.gitignore`. Log files can still hold usernames, reservation ids, and masked contact hints; treat them as private. Passwords, hashes, session tokens, cookies, avatars, H2 credentials, payment secrets, raw request bodies, cancellation notes, and review text are not written.
+
+---
+
 ## Tests
 
 Windows:
@@ -326,6 +355,12 @@ The coach offering form loads levels **after** the sport is selected. The server
 ## Avatars
 
 Files are stored under **`./data/avatars/`** as `{userId}.jpg` (or png / webp / gif), served from `GET /avatars/{userId}`. Missing files return a green initials placeholder. Max size 1 MB. This directory is inside `./data/` and must not be committed (personal photos).
+
+---
+
+## Do not commit
+
+Keep these off GitHub: `./data/` (H2 files and avatars), `./logs/` (application logs), `.env`, `build/`, and `.gradle/`. The Gradle wrapper under `gradle/wrapper/` should stay in the repository.
 
 ---
 
