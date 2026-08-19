@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.thymeleaf.org/extras/spring-security" lang="en">
+<body>
+<header class="site-header" th:fragment="header">
+    <div class="header-inner">
+        <a class="brand" th:href="@{/}">
+            <span class="brand-mark" aria-hidden="true">
+                <img th:src="@{/images/brand/logo.png}" alt="" width="40" height="40">
+            </span>
+            <span class="brand-copy">
+                <span class="brand-name">Courtly</span>
+                <span class="brand-tag">Sports Facility Booking</span>
+            </span>
+        </a>
+        <nav class="main-nav" aria-label="Primary">
+            <th:block sec:authorize="isAuthenticated()">
+                <a class="nav-link" th:href="@{/facilities}">Facilities</a>
+                <a class="nav-link" th:href="@{/reservations}">History</a>
+                <a class="nav-link" th:href="@{/occupancy}">Occupancy</a>
+                <a class="nav-link" sec:authorize="hasRole('COACH')" th:href="@{/coach/offerings}">Offerings</a>
+                <a class="nav-link" sec:authorize="hasRole('COACH')" th:href="@{/coach/sessions}">Sessions</a>
+                <a class="nav-link" sec:authorize="hasAnyRole('ADMIN','MANAGER')" th:href="@{/manager/reservations}">Queue</a>
+                <a class="nav-link" sec:authorize="hasRole('ADMIN')" th:href="@{/admin/users}">Staff</a>
+                <span class="nav-user" th:if="${currentUser != null}">
+                    <a class="nav-user-name"
+                       th:href="@{/profile}"
+                       th:text="${currentUser.fullName != null and !#strings.isEmpty(currentUser.fullName) ? currentUser.fullName : currentUser.username}">Athlete</a>
+                </span>
+                <form class="logout-form" th:action="@{/logout}" method="post">
+                    <button class="btn btn-ghost" type="submit">Log out</button>
+                </form>
+            </th:block>
+            <th:block sec:authorize="isAnonymous()">
+                <a class="nav-link" th:href="@{/login}">Sign in</a>
+                <a class="btn btn-accent" th:href="@{/register}">Create account</a>
+            </th:block>
+        </nav>
+    </div>
+</header>
+<footer class="site-footer" th:fragment="footer">
+    <p>Courtly · Track B Resource Reservation and Scheduling</p>
+</footer>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:replace="~{fragments/head :: head('Occupancy')}"></head>
+<body class="app-body">
+<div class="court-grid" aria-hidden="true"></div>
+<header th:replace="~{fragments/nav :: header}"></header>
+<main class="dashboard occupancy-page">
+    <div class="section-head">
+        <p class="eyebrow">Capacity board</p>
+        <h1>Occupancy</h1>
+        <p>Confirmed bookings versus capacity for every hour. Open a free cell to book that court.</p>
+    </div>
+    <form id="occupancy-filter" class="occ-filters" method="get" th:action="@{/occupancy}">
+        <div class="field">
+            <label for="date">Date</label>
+            <input id="date" name="date" type="date" required th:value="${selectedDate}">
+        </div>
+        <div class="field">
+            <label for="facilityId">Facility</label>
+            <select id="facilityId" name="facilityId">
+                <option value="">All facilities</option>
+                <option th:each="facility : ${facilities}"
+                        th:value="${facility.id}"
+                        th:text="${facility.name}"
+                        th:selected="${facilityId != null and facilityId == facility.id}">Venue</option>
+            </select>
+        </div>
+        <button class="btn btn-accent" type="submit">Show board</button>
+    </form>
+    <ul class="occ-legend" aria-label="Occupancy legend">
+        <li><span class="occ-swatch occ-free"></span> Free</li>
+        <li><span class="occ-swatch occ-low"></span> Low</li>
+        <li><span class="occ-swatch occ-partial"></span> Partial</li>
+        <li><span class="occ-swatch occ-near"></span> Nearly full</li>
+        <li><span class="occ-swatch occ-full"></span> Full</li>
+        <li><span class="occ-swatch occ-past"></span> Past / closed</li>
+    </ul>
+    <p class="lede" th:if="${grid == null or #lists.isEmpty(grid.rows)}">No bookable courts for this filter.</p>
+    <div class="occ-wrap" th:if="${grid != null and !#lists.isEmpty(grid.rows)}">
+        <table class="occ-table">
+            <thead>
+            <tr>
+                <th class="occ-resource">Court</th>
+                <th th:each="hour : ${grid.hours}" th:text="${#temporals.format(hour, 'HH:mm')}">07:00</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="row : ${grid.rows}">
+                <th class="occ-resource">
+                    <span class="occ-name" th:text="${row.resourceName}">Court</span>
+                    <span class="occ-meta" th:text="${row.facilityName}">Venue</span>
+                    <span class="occ-meta" th:text="${row.sport}">Tennis</span>
+                </th>
+                <td th:each="cell : ${row.cells}">
+                    <a th:if="${cell.bookable}"
+                       class="occ-cell"
+                       th:classappend="'occ-' + ${cell.level}"
+                       th:href="@{/resources/{id}(id=${row.resourceId}, date=${grid.date}, start=${#temporals.format(cell.start, 'HH:mm')})}">
+                        <span th:text="${cell.booked + '/' + cell.capacity}">0/1</span>
+                    </a>
+                    <span th:unless="${cell.bookable}"
+                          class="occ-cell is-locked"
+                          th:classappend="'occ-' + ${cell.level}">
+                        <span th:text="${cell.booked + '/' + cell.capacity}">1/1</span>
+                    </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</main>
+<footer th:replace="~{fragments/nav :: footer}"></footer>
+<script th:src="@{/js/app.js}"></script>
+<script th:src="@{/js/occupancy.js}"></script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:replace="~{fragments/head :: head('Home')}"></head>
+<body class="app-body">
+<div class="court-grid" aria-hidden="true"></div>
+<header th:replace="~{fragments/nav :: header}"></header>
+<main class="dashboard">
+    <section class="hero-card hero-photo reveal">
+        <img th:src="@{/images/home/tennis-player.png}" alt="Tennis player on a grass court">
+        <div class="hero-photo-content">
+            <div>
+                <p class="eyebrow">Warsaw courts</p>
+                <h1>
+                    Welcome back,
+                    <span th:text="${currentUser != null ? currentUser.fullName : 'athlete'}">athlete</span>
+                </h1>
+                <p class="lede">Find a court in Warsaw and book your game.</p>
+            </div>
+        </div>
+    </section>
+    <section class="stat-row reveal" aria-label="Desk metrics">
+        <article class="stat-card reveal-child">
+            <p class="stat-kicker">Today</p>
+            <p class="stat-value" th:text="${occupancyPercent + '%'}">0%</p>
+            <p class="stat-label">Occupancy heatmap</p>
+        </article>
+        <article class="stat-card reveal-child">
+            <p class="stat-kicker">Your reservations</p>
+            <p class="stat-value" th:text="${upcomingCount}">0</p>
+            <p class="stat-label">Upcoming bookings</p>
+        </article>
+        <article class="stat-card reveal-child">
+            <p class="stat-kicker">Inventory</p>
+            <p class="stat-value" th:text="${facilityCount}">0</p>
+            <p class="stat-label">Active facilities</p>
+        </article>
+        <article class="stat-card reveal-child">
+            <p class="stat-kicker">Instances</p>
+            <p class="stat-value" th:text="${resourceCount}">0</p>
+            <p class="stat-label">Bookable courts</p>
+        </article>
+    </section>
+    <section class="reveal">
+        <div class="section-head">
+            <h2>How it works</h2>
+            <p>Three quiet steps from a Warsaw venue to a confirmed hour on court.</p>
+        </div>
+        <div class="home-steps">
+            <article class="home-step reveal-child">
+                <img th:src="@{/images/sports/tennis.jpg}" alt="Tennis court in Warsaw">
+                <span class="module-icon" aria-hidden="true">01</span>
+                <h3>Browse venues</h3>
+                <p>Open the Warsaw network and pick a facility — each court, gym, and pool has its own address.</p>
+            </article>
+            <article class="home-step reveal-child">
+                <img th:src="@{/images/sports/gym.jpg}" alt="Gym floor">
+                <span class="module-icon" aria-hidden="true">02</span>
+                <h3>Claim a slot</h3>
+                <p>Choose a free start, add extras if you need them, and pick how you will pay on site.</p>
+            </article>
+            <article class="home-step reveal-child">
+                <img th:src="@{/images/sports/football.jpg}" alt="Football pitch">
+                <span class="module-icon" aria-hidden="true">03</span>
+                <h3>Pending, then play</h3>
+                <p>Your booking holds the hour as pending until a manager confirms. Cancel a pending booking from history until it is confirmed.</p>
+            </article>
+        </div>
+    </section>
+    <section class="reveal">
+        <div class="section-head">
+            <h2>What you can book</h2>
+            <p>Tennis, gyms, pool lanes, and football pitches across the city — plus halls and squash where the venue has them.</p>
+        </div>
+        <div class="sport-gallery">
+            <figure class="sport-tile reveal-child">
+                <img th:src="@{/images/sports/tennis.jpg}" alt="Tennis">
+                <figcaption>Tennis</figcaption>
+            </figure>
+            <figure class="sport-tile reveal-child">
+                <img th:src="@{/images/sports/gym.jpg}" alt="Gym">
+                <figcaption>Gym</figcaption>
+            </figure>
+            <figure class="sport-tile reveal-child">
+                <img th:src="@{/images/sports/swimming.jpg}" alt="Swimming">
+                <figcaption>Pool</figcaption>
+            </figure>
+            <figure class="sport-tile reveal-child">
+                <img th:src="@{/images/sports/football.jpg}" alt="Football">
+                <figcaption>Football</figcaption>
+            </figure>
+        </div>
+    </section>
+    <section class="home-occupancy reveal">
+        <img th:src="@{/images/sports/tennis.jpg}" alt="Tennis coaching">
+        <div class="home-occupancy-copy">
+            <p class="eyebrow">Coaches</p>
+            <h2>Train at your level</h2>
+            <p>Admins add coaches to Courtly. When you book a court, gym, or pool — not a group lesson — you can add a coach as an extra. Pick your real level for that sport and only matching coaches appear, each with their own hourly price.</p>
+            <a class="btn btn-accent" th:href="@{/facilities}">Book a venue</a>
+        </div>
+    </section>
+    <section class="home-occupancy reveal">
+        <img th:src="@{/images/sports/basketball.jpg}" alt="Indoor sports hall">
+        <div class="home-occupancy-copy">
+            <p class="eyebrow">Live capacity</p>
+            <h2>Find a free hour</h2>
+            <p>The occupancy board shows how full each court is across the day. A green hour is open — tap it and you land on that booking.</p>
+            <a class="btn btn-accent" th:href="@{/occupancy}">Open occupancy</a>
+        </div>
+    </section>
+    <section class="home-cta reveal">
+        <div>
+            <p class="eyebrow">Ready when you are</p>
+            <h2>Pick a venue and play</h2>
+            <p>Facilities, occupancy, and reservation history are live. Welcome in.</p>
+        </div>
+        <a class="btn btn-accent" th:href="@{/facilities}">Browse facilities</a>
+    </section>
+    <section class="reveal">
+        <div class="section-head">
+            <h2>On the board</h2>
+            <p>Jump straight to the desk you need.</p>
+        </div>
+        <div class="module-grid">
+            <a class="module-card reveal-child" th:href="@{/facilities}">
+                <span class="module-icon" aria-hidden="true">01</span>
+                <h3>Facilities</h3>
+                <p>Warsaw venues with courts, pitches, pools, and gyms — each instance has its own address.</p>
+                <span class="chip">Open</span>
+            </a>
+            <a class="module-card reveal-child" th:href="@{/facilities}">
+                <span class="module-icon" aria-hidden="true">02</span>
+                <h3>Slots</h3>
+                <p>Open a venue, pick a start, and claim the court while it is free.</p>
+                <span class="chip">Via facilities</span>
+            </a>
+            <a class="module-card reveal-child" th:href="@{/reservations}">
+                <span class="module-icon" aria-hidden="true">03</span>
+                <h3>History</h3>
+                <p>Your confirmations and cancellations, newest first. Pending bookings can be cancelled until they are confirmed.</p>
+                <span class="chip">Open</span>
+            </a>
+            <a class="module-card reveal-child" th:href="@{/occupancy}">
+                <span class="module-icon" aria-hidden="true">04</span>
+                <h3>Occupancy</h3>
+                <p>Live capacity heat across the city network. Click a free hour to book that court.</p>
+                <span class="chip">Open</span>
+            </a>
+        </div>
+    </section>
+</main>
+<footer th:replace="~{fragments/nav :: footer}"></footer>
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>
