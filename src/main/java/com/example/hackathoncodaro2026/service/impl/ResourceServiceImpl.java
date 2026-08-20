@@ -53,6 +53,16 @@ public class ResourceServiceImpl implements ResourceService {
 
     @Override
     public List<TimeSlotView> slotsFor(SportResource resource, LocalDate date, ReservationKind kind) {
+        return slotsFor(resource, date, kind, null);
+    }
+
+    @Override
+    public List<TimeSlotView> slotsFor(
+            SportResource resource,
+            LocalDate date,
+            ReservationKind kind,
+            Long excludeReservationId
+    ) {
         List<TimeSlotView> slots = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now(WARSAW);
         LocalTime cursor = resource.getOpeningTime();
@@ -63,11 +73,12 @@ public class ResourceServiceImpl implements ResourceService {
             LocalTime end = cursor.plusMinutes(duration);
             LocalDateTime startAt = LocalDateTime.of(date, start);
             LocalDateTime endAt = LocalDateTime.of(date, end);
-            long booked = reservationRepository.countOverlapping(
+            long booked = reservationRepository.countOverlappingExcluding(
                     resource.getId(),
                     ReservationStatus.occupying(),
                     startAt,
-                    endAt
+                    endAt,
+                    excludeReservationId
             );
             boolean remaining = lesson ? booked == 0 : booked < resource.getCapacity();
             boolean future = startAt.isAfter(now);

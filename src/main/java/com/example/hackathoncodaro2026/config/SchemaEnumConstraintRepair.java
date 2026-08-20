@@ -42,6 +42,9 @@ public class SchemaEnumConstraintRepair implements ApplicationRunner {
         dropMatchingChecks("COACH_OFFERINGS", "SPORT_TYPE", resourceTypes);
         dropMatchingChecks("COACH_OFFERING_LEVELS", "SKILL_LEVEL", List.of("BEGINNER", "INTERMEDIATE", "ADVANCED", "COMPETITIVE"));
         dropMatchingChecks("RESERVATIONS", "SKILL_LEVEL", List.of("BEGINNER", "INTERMEDIATE", "ADVANCED", "COMPETITIVE"));
+        dropMatchingChecks("NOTIFICATIONS", "TYPE", List.of(
+                "RESERVATION_UPDATED", "COACH_REMOVED", "COACH_ASSIGNED", "COACH_SCHEDULE_CHANGED"
+        ));
         widenColumn("APP_USERS", "ROLE");
         widenColumn("RESERVATIONS", "STATUS");
         widenColumn("RESERVATIONS", "PAYMENT_METHOD");
@@ -52,6 +55,7 @@ public class SchemaEnumConstraintRepair implements ApplicationRunner {
         widenColumn("USER_SPORT_LEVELS", "SKILL_LEVEL");
         widenColumn("COACH_OFFERINGS", "SPORT_TYPE");
         widenColumn("COACH_OFFERING_LEVELS", "SKILL_LEVEL");
+        widenColumn("NOTIFICATIONS", "TYPE");
         makeColumnNullable("RESERVATION_EXTRAS", "ITEM_ID");
     }
 

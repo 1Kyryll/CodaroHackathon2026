@@ -3,9 +3,13 @@ package com.example.hackathoncodaro2026.repository;
 import com.example.hackathoncodaro2026.model.Reservation;
 import com.example.hackathoncodaro2026.model.User;
 import com.example.hackathoncodaro2026.model.enums.ReservationStatus;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.QueryHint;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
@@ -27,6 +31,22 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             @Param("statuses") Collection<ReservationStatus> statuses,
             @Param("startAt") LocalDateTime startAt,
             @Param("endAt") LocalDateTime endAt
+    );
+
+    @Query("""
+            SELECT COALESCE(SUM(r.occupancyUnits), 0) FROM Reservation r
+            WHERE r.resource.id = :resourceId
+              AND r.status IN :statuses
+              AND r.startAt < :endAt
+              AND r.endAt > :startAt
+              AND (:excludeId IS NULL OR r.id <> :excludeId)
+            """)
+    long countOverlappingExcluding(
+            @Param("resourceId") Long resourceId,
+            @Param("statuses") Collection<ReservationStatus> statuses,
+            @Param("startAt") LocalDateTime startAt,
+            @Param("endAt") LocalDateTime endAt,
+            @Param("excludeId") Long excludeId
     );
 
     @Query("""
@@ -65,6 +85,11 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             """)
     Optional<Reservation> findWithDetailsById(@Param("id") Long id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "4000"))
+    @Query("SELECT r FROM Reservation r WHERE r.id = :id")
+    Optional<Reservation> lockById(@Param("id") Long id);
+
     @Query("""
             SELECT r FROM Reservation r
             JOIN FETCH r.resource res
@@ -92,6 +117,22 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             @Param("statuses") Collection<ReservationStatus> statuses,
             @Param("startAt") LocalDateTime startAt,
             @Param("endAt") LocalDateTime endAt
+    );
+
+    @Query("""
+            SELECT COUNT(r) FROM Reservation r
+            WHERE r.coach.id = :coachId
+              AND r.status IN :statuses
+              AND r.startAt < :endAt
+              AND r.endAt > :startAt
+              AND (:excludeId IS NULL OR r.id <> :excludeId)
+            """)
+    long countCoachOverlappingExcluding(
+            @Param("coachId") Long coachId,
+            @Param("statuses") Collection<ReservationStatus> statuses,
+            @Param("startAt") LocalDateTime startAt,
+            @Param("endAt") LocalDateTime endAt,
+            @Param("excludeId") Long excludeId
     );
 
     @Query("""

@@ -10,6 +10,7 @@
         <h1 th:text="${adminView} ? 'All reservations' : 'My reservations'">My reservations</h1>
         <p th:if="${adminView}">Every booking across the Warsaw network, newest first.</p>
         <p th:unless="${adminView}">Upcoming, pending, past, and cancelled sessions. Pending bookings can be cancelled until they are confirmed.</p>
+        <p class="lede">Only pending reservations can be changed.</p>
     </div>
     <div class="alert alert-success" th:if="${successMessage}" th:text="${successMessage}"></div>
     <div class="alert alert-error" th:if="${errorMessage}" th:text="${errorMessage}"></div>
@@ -81,6 +82,9 @@
                         class="btn btn-danger js-open-cancel"
                         th:if="${item.status.name() == 'PENDING' and item.startAt.isAfter(now)}"
                         th:attr="data-action=@{/reservations/{id}/cancel(id=${item.id})}">Cancel</button>
+                <a class="btn btn-ghost"
+                   th:if="${editableIds != null and editableIds.contains(item.id)}"
+                   th:href="@{/reservations/{id}/edit(id=${item.id})}">Edit</a>
                 <button type="button"
                         class="btn btn-accent js-open-rating"
                         th:if="${rateableIds.contains(item.id)}"

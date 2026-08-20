@@ -172,6 +172,28 @@ main {
     text-transform: uppercase;
 }
 
+.nav-notify {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.nav-badge {
+    min-width: 1.15rem;
+    height: 1.15rem;
+    padding: 0 0.35rem;
+    border-radius: 999px;
+    background: var(--grass);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .nav-link.is-disabled {
     opacity: 0.45;
     cursor: default;
@@ -1386,4 +1408,44 @@ a.occ-cell:hover {
     .home-occupancy img {
         min-height: 180px;
     }
+}
+
+.readonly-box {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0 0 1rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--bg);
+}
+
+.notice-toolbar {
+    margin: 0 0 1rem;
+}
+
+.notice-list {
+    display: grid;
+    gap: 0.85rem;
+}
+
+.notice-card {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+    padding: 1rem 1.1rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+}
+
+.notice-card.is-unread {
+    border-color: rgba(46, 139, 87, 0.35);
+    box-shadow: var(--shadow);
+}
+
+.notice-main {
+    display: grid;
+    gap: 0.25rem;
 }

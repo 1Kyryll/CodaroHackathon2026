@@ -18,5 +18,7 @@ public interface ResourceService {
 
     List<TimeSlotView> slotsFor(SportResource resource, LocalDate date, ReservationKind kind);
 
+    List<TimeSlotView> slotsFor(SportResource resource, LocalDate date, ReservationKind kind, Long excludeReservationId);
+
     long countEnabled();
 }

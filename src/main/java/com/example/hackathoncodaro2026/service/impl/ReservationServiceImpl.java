@@ -1,6 +1,7 @@
 package com.example.hackathoncodaro2026.service.impl;
 
 import com.example.hackathoncodaro2026.dto.ReservationRequest;
+import com.example.hackathoncodaro2026.dto.ReservationUpdateResult;
 import com.example.hackathoncodaro2026.exception.ReservationException;
 import com.example.hackathoncodaro2026.model.CoachOffering;
 import com.example.hackathoncodaro2026.model.InventoryItem;
@@ -9,6 +10,7 @@ import com.example.hackathoncodaro2026.model.ReservationExtra;
 import com.example.hackathoncodaro2026.model.SportResource;
 import com.example.hackathoncodaro2026.model.User;
 import com.example.hackathoncodaro2026.model.enums.CancellationReason;
+import com.example.hackathoncodaro2026.model.enums.NotificationType;
 import com.example.hackathoncodaro2026.model.enums.ReservationKind;
 import com.example.hackathoncodaro2026.model.enums.ReservationStatus;
 import com.example.hackathoncodaro2026.model.enums.Role;
@@ -20,6 +22,7 @@ import com.example.hackathoncodaro2026.repository.SportResourceRepository;
 import com.example.hackathoncodaro2026.repository.UserRepository;
 import com.example.hackathoncodaro2026.service.AuditLogService;
 import com.example.hackathoncodaro2026.service.CoachOfferingService;
+import com.example.hackathoncodaro2026.service.NotificationService;
 import com.example.hackathoncodaro2026.service.PricingService;
 import com.example.hackathoncodaro2026.service.ReservationService;
 import com.example.hackathoncodaro2026.service.SportSkillLevelCatalog;
@@ -36,10 +39,16 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -49,6 +58,7 @@ public class ReservationServiceImpl implements ReservationService {
 
     private static final ZoneId WARSAW = ZoneId.of("Europe/Warsaw");
     private static final Pattern PHONE = Pattern.compile("^[+]?[0-9\\s().-]{7,20}$");
+    private static final DateTimeFormatter RANGE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     private final ReservationRepository reservationRepository;
     private final SportResourceRepository sportResourceRepository;
@@ -61,6 +71,7 @@ public class ReservationServiceImpl implements ReservationService {
     private final CoachOfferingService coachOfferingService;
     private final SportSkillLevelCatalog sportSkillLevelCatalog;
     private final AuditLogService auditLogService;
+    private final NotificationService notificationService;
 
     public ReservationServiceImpl(
             ReservationRepository reservationRepository,
@@ -73,7 +84,8 @@ public class ReservationServiceImpl implements ReservationService {
             CoachRatingRepository coachRatingRepository,
             CoachOfferingService coachOfferingService,
             SportSkillLevelCatalog sportSkillLevelCatalog,
-            AuditLogService auditLogService
+            AuditLogService auditLogService,
+            NotificationService notificationService
     ) {
         this.reservationRepository = reservationRepository;
         this.sportResourceRepository = sportResourceRepository;
@@ -86,6 +98,7 @@ public class ReservationServiceImpl implements ReservationService {
         this.coachOfferingService = coachOfferingService;
         this.sportSkillLevelCatalog = sportSkillLevelCatalog;
         this.auditLogService = auditLogService;
+        this.notificationService = notificationService;
     }
 
     @Override
@@ -237,6 +250,254 @@ public class ReservationServiceImpl implements ReservationService {
         }
         auditCreated(saved, occupant, extras);
         return saved;
+    }
+
+    @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public ReservationUpdateResult update(User actor, Long reservationId, ReservationRequest request) {
+        Reservation reservation;
+        try {
+            reservation = reservationRepository.lockById(reservationId)
+                    .orElseThrow(() -> updateFail(actor, reservationId, "NOT_OWNER", "That reservation could not be found"));
+            reservation.getUser().getId();
+            reservation.getResource().getId();
+            if (reservation.getResource().getFacility() != null) {
+                reservation.getResource().getFacility().getId();
+            }
+            if (reservation.getCoach() != null) {
+                reservation.getCoach().getId();
+            }
+            for (ReservationExtra extra : reservation.getExtras()) {
+                if (extra.getItem() != null) {
+                    extra.getItem().getId();
+                }
+            }
+        } catch (TransientDataAccessException ex) {
+            throw updateFail(actor, reservationId, "LOCK_TIMEOUT", "This reservation could not be updated, try again");
+        }
+        if (reservation.getUser() == null || actor == null || !reservation.getUser().getId().equals(actor.getId())) {
+            throw updateFail(actor, reservationId, "NOT_OWNER", "That reservation could not be found");
+        }
+        if (reservation.getStatus() != ReservationStatus.PENDING) {
+            throw updateFail(actor, reservationId, "NOT_PENDING", "Only pending reservations can be changed.");
+        }
+        LocalDateTime now = LocalDateTime.now(WARSAW);
+        if (!reservation.getStartAt().isAfter(now)) {
+            throw updateFail(actor, reservationId, "NOT_PENDING", "This reservation can no longer be changed.");
+        }
+        SportResource resource;
+        try {
+            resource = sportResourceRepository.lockById(reservation.getResource().getId())
+                    .orElseThrow(() -> updateFail(actor, reservationId, "VALIDATION", "That court could not be found"));
+        } catch (TransientDataAccessException ex) {
+            throw updateFail(actor, reservationId, "LOCK_TIMEOUT", "This reservation could not be updated, try again");
+        }
+        if (!resource.isEnabled() || resource.getFacility() == null || !resource.getFacility().isEnabled()) {
+            throw updateFail(actor, reservationId, "VALIDATION", "resourceId", "This venue is not open for booking");
+        }
+        request.setResourceId(resource.getId());
+        request.setKind(reservation.getKind());
+        ReservationKind kind = reservation.getKind();
+        if (request.getPaymentMethod() == null) {
+            throw updateFail(actor, reservationId, "VALIDATION", "paymentMethod", "Choose a payment method");
+        }
+        int partySize = resolvePartySizeForUpdate(resource, request, kind, actor, reservationId);
+        List<InventoryItem> extras = resolveExtrasForUpdate(resource, request.getExtraIds(), actor, reservationId);
+        if (request.getDate() == null || request.getStartTime() == null) {
+            throw updateFail(actor, reservationId, "INVALID_TIME", "startTime", "Choose a start time");
+        }
+        LocalDateTime startAt = LocalDateTime.of(request.getDate(), request.getStartTime());
+        int hours = request.getDurationHours() == null ? 1 : request.getDurationHours();
+        if (hours < 1 || hours > 4) {
+            throw updateFail(actor, reservationId, "INVALID_TIME", "durationHours", "Duration must be between 1 and 4 hours");
+        }
+        int durationMinutes = hours * 60;
+        if (durationMinutes % resource.getSlotDurationMinutes() != 0) {
+            throw updateFail(
+                    actor,
+                    reservationId,
+                    "INVALID_TIME",
+                    "durationHours",
+                    "Duration must be a multiple of " + resource.getSlotDurationMinutes() + " minutes"
+            );
+        }
+        LocalDateTime endAt = startAt.plusMinutes(durationMinutes);
+        if (!startAt.isAfter(now)) {
+            throw updateFail(actor, reservationId, "INVALID_TIME", "startTime", "You cannot book a slot in the past");
+        }
+        if (!endAt.isAfter(startAt)) {
+            throw updateFail(actor, reservationId, "INVALID_TIME", "startTime", "End time must be after start time");
+        }
+        if (!isAligned(resource, request.getStartTime())) {
+            throw updateFail(
+                    actor,
+                    reservationId,
+                    "INVALID_TIME",
+                    "startTime",
+                    "Start time must match a " + resource.getSlotDurationMinutes() + "-minute slot"
+            );
+        }
+        if (request.getStartTime().isBefore(resource.getOpeningTime())
+                || endAt.toLocalTime().isAfter(resource.getClosingTime())
+                || endAt.toLocalDate().isAfter(request.getDate())) {
+            throw updateFail(actor, reservationId, "INVALID_TIME", "durationHours", "That duration sits outside opening hours");
+        }
+        User occupant = applyBookingPhoneForUpdate(actor, request, reservationId);
+        Long oldCoachId = reservation.getCoach() == null ? null : reservation.getCoach().getId();
+        Long requestedCoachId = request.getCoachId();
+        if (kind == ReservationKind.LESSON && requestedCoachId != null) {
+            throw updateFail(actor, reservationId, "VALIDATION", "coachId", "A coach cannot be added to a group lesson");
+        }
+        Map<Long, User> lockedCoaches = lockCoachesInOrder(oldCoachId, requestedCoachId, occupant, reservationId);
+        AssignedCoach assignedCoach = resolveCoachLocked(
+                resource,
+                kind,
+                request,
+                hours,
+                occupant,
+                reservationId,
+                requestedCoachId == null ? null : lockedCoaches.get(requestedCoachId)
+        );
+        LocalTime cursor = request.getStartTime();
+        while (cursor.isBefore(endAt.toLocalTime())) {
+            LocalDateTime slotStart = LocalDateTime.of(request.getDate(), cursor);
+            LocalDateTime slotEnd = slotStart.plusMinutes(resource.getSlotDurationMinutes());
+            long booked = reservationRepository.countOverlappingExcluding(
+                    resource.getId(),
+                    ReservationStatus.occupying(),
+                    slotStart,
+                    slotEnd,
+                    reservation.getId()
+            );
+            if (kind == ReservationKind.LESSON) {
+                if (booked > 0) {
+                    throw updateFail(
+                            occupant,
+                            reservationId,
+                            "CAPACITY_FULL",
+                            "startTime",
+                            "This lesson is not available because people are already coming"
+                    );
+                }
+            } else if (booked >= resource.getCapacity()) {
+                throw updateFail(occupant, reservationId, "CAPACITY_FULL", "startTime", "That slot is fully booked");
+            }
+            cursor = cursor.plusMinutes(resource.getSlotDurationMinutes());
+        }
+        if (assignedCoach != null) {
+            long coachBooked = reservationRepository.countCoachOverlappingExcluding(
+                    assignedCoach.coach().getId(),
+                    ReservationStatus.occupying(),
+                    startAt,
+                    endAt,
+                    reservation.getId()
+            );
+            if (coachBooked > 0) {
+                throw updateFail(occupant, reservationId, "COACH_OVERLAP", "coachId", "That coach is no longer available for this time");
+            }
+        }
+        BigDecimal coachFee = assignedCoach == null
+                ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+                : assignedCoach.fee();
+        LocalDateTime oldStart = reservation.getStartAt();
+        LocalDateTime oldEnd = reservation.getEndAt();
+        BigDecimal oldAmount = reservation.getTotalAmount() == null
+                ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+                : reservation.getTotalAmount().setScale(2, RoundingMode.HALF_UP);
+        User oldCoach = reservation.getCoach();
+        int oldParty = reservation.getPartySize();
+        String oldSkill = reservation.getSkillLevel();
+        var oldPayment = reservation.getPaymentMethod();
+        String oldNote = reservation.getNote();
+        Set<Long> oldExtraIds = reservation.getExtras().stream()
+                .map(ReservationExtra::getItem)
+                .filter(Objects::nonNull)
+                .map(InventoryItem::getId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        BigDecimal newAmount = pricingService.quote(
+                resource,
+                request.getDate(),
+                request.getStartTime(),
+                hours,
+                kind,
+                extras,
+                partySize,
+                coachFee
+        );
+        reservation.getExtras().clear();
+        reservation.setStartAt(startAt);
+        reservation.setEndAt(endAt);
+        reservation.setPartySize(partySize);
+        reservation.setPaymentMethod(request.getPaymentMethod());
+        reservation.setKind(kind);
+        reservation.setOccupancyUnits(kind == ReservationKind.LESSON ? resource.getCapacity() : 1);
+        reservation.setStatus(ReservationStatus.PENDING);
+        if (assignedCoach != null) {
+            reservation.setCoach(assignedCoach.coach());
+            reservation.setSkillLevel(assignedCoach.level());
+        } else {
+            reservation.setCoach(null);
+            if (request.getSkillLevel() != null && !request.getSkillLevel().isBlank()
+                    && sportSkillLevelCatalog.isValid(resource.getType(), request.getSkillLevel().trim())) {
+                reservation.setSkillLevel(request.getSkillLevel().trim());
+            } else {
+                reservation.setSkillLevel(null);
+            }
+        }
+        reservation.setTotalAmount(newAmount);
+        if (request.getNote() != null && !request.getNote().isBlank()) {
+            reservation.setNote(request.getNote().trim());
+        } else {
+            reservation.setNote(null);
+        }
+        for (InventoryItem item : extras) {
+            ReservationExtra extra = new ReservationExtra();
+            extra.setItem(item);
+            extra.setQuantity(partySize);
+            reservation.addExtra(extra);
+        }
+        if (assignedCoach != null) {
+            ReservationExtra coachExtra = new ReservationExtra();
+            coachExtra.setDescription("Coach " + assignedCoach.coach().getFullName());
+            coachExtra.setQuantity(1);
+            coachExtra.setUnitAmount(coachFee);
+            reservation.addExtra(coachExtra);
+        }
+        if (reservation.getSkillLevel() != null) {
+            userService.saveSportLevel(occupant, resource.getType(), reservation.getSkillLevel());
+        }
+        Reservation saved;
+        try {
+            saved = reservationRepository.save(reservation);
+            reservationRepository.flush();
+        } catch (TransientDataAccessException ex) {
+            throw updateFail(occupant, reservationId, "LOCK_TIMEOUT", "This reservation could not be updated, try again");
+        }
+        Long newCoachId = saved.getCoach() == null ? null : saved.getCoach().getId();
+        notifyReservationUpdated(occupant, saved, oldAmount, newAmount);
+        notifyCoachesOfUpdate(oldCoach, saved.getCoach(), oldStart, oldEnd, saved.getStartAt(), saved.getEndAt(), saved.getId(), occupant);
+        List<String> changed = changedFields(
+                oldStart,
+                oldEnd,
+                saved.getStartAt(),
+                saved.getEndAt(),
+                oldAmount,
+                newAmount,
+                oldCoachId,
+                newCoachId,
+                oldParty,
+                saved.getPartySize(),
+                oldPayment,
+                saved.getPaymentMethod(),
+                oldSkill,
+                saved.getSkillLevel(),
+                oldNote,
+                saved.getNote(),
+                oldExtraIds,
+                extras
+        );
+        auditUpdated(saved, occupant, oldStart, oldEnd, oldAmount, oldCoachId, changed);
+        return new ReservationUpdateResult(saved, oldAmount, newAmount);
     }
 
     @Override
@@ -392,6 +653,28 @@ public class ReservationServiceImpl implements ReservationService {
     @Transactional
     public int deleteEndedOlderThanOneMonth() {
         return deleteEndedBefore(LocalDateTime.now(WARSAW).minusMonths(1));
+    }
+
+    @Override
+    public Optional<Reservation> findWithDetails(Long id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        return reservationRepository.findWithDetailsById(id);
+    }
+
+    @Override
+    public boolean canEdit(User actor, Reservation reservation) {
+        if (actor == null || actor.getId() == null || reservation == null) {
+            return false;
+        }
+        if (reservation.getUser() == null || !actor.getId().equals(reservation.getUser().getId())) {
+            return false;
+        }
+        if (reservation.getStatus() != ReservationStatus.PENDING || reservation.getStartAt() == null) {
+            return false;
+        }
+        return reservation.getStartAt().isAfter(LocalDateTime.now(WARSAW));
     }
 
     private ReservationKind resolveKind(SportResource resource, ReservationRequest request, User actor) {
@@ -551,6 +834,335 @@ public class ReservationServiceImpl implements ReservationService {
             );
         }
         auditLogService.record(actor, "RESERVATION_CREATE", "RESERVATION", saved.getId(), "SUCCESS", details);
+    }
+
+    private void auditUpdated(
+            Reservation saved,
+            User actor,
+            LocalDateTime oldStart,
+            LocalDateTime oldEnd,
+            BigDecimal oldAmount,
+            Long oldCoachId,
+            List<String> changed
+    ) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        if (saved.getResource() != null) {
+            details.put("resourceId", saved.getResource().getId());
+        }
+        details.put("oldStartAt", oldStart);
+        details.put("newStartAt", saved.getStartAt());
+        details.put("oldEndAt", oldEnd);
+        details.put("newEndAt", saved.getEndAt());
+        details.put("oldAmount", money(oldAmount));
+        details.put("newAmount", money(saved.getTotalAmount()));
+        details.put("oldCoachId", oldCoachId == null ? "" : oldCoachId);
+        details.put("newCoachId", saved.getCoach() == null ? "" : saved.getCoach().getId());
+        details.put("changedFields", String.join(",", changed));
+        auditLogService.record(actor, "RESERVATION_UPDATE", "RESERVATION", saved.getId(), "SUCCESS", details);
+    }
+
+    private List<String> changedFields(
+            LocalDateTime oldStart,
+            LocalDateTime oldEnd,
+            LocalDateTime newStart,
+            LocalDateTime newEnd,
+            BigDecimal oldAmount,
+            BigDecimal newAmount,
+            Long oldCoachId,
+            Long newCoachId,
+            int oldParty,
+            int newParty,
+            Object oldPayment,
+            Object newPayment,
+            String oldSkill,
+            String newSkill,
+            String oldNote,
+            String newNote,
+            Set<Long> oldExtraIds,
+            List<InventoryItem> extras
+    ) {
+        List<String> changed = new ArrayList<>();
+        if (!Objects.equals(oldStart, newStart)) {
+            changed.add("startAt");
+        }
+        if (!Objects.equals(oldEnd, newEnd)) {
+            changed.add("endAt");
+        }
+        if (oldAmount == null || newAmount == null || oldAmount.compareTo(newAmount) != 0) {
+            changed.add("totalAmount");
+        }
+        if (!Objects.equals(oldCoachId, newCoachId)) {
+            changed.add("coach");
+        }
+        if (oldParty != newParty) {
+            changed.add("partySize");
+        }
+        if (!Objects.equals(oldPayment, newPayment)) {
+            changed.add("paymentMethod");
+        }
+        if (!Objects.equals(blankToNull(oldSkill), blankToNull(newSkill))) {
+            changed.add("skillLevel");
+        }
+        if (!Objects.equals(blankToNull(oldNote), blankToNull(newNote))) {
+            changed.add("note");
+        }
+        Set<Long> newExtraIds = extras == null
+                ? Set.of()
+                : extras.stream().map(InventoryItem::getId).collect(Collectors.toCollection(LinkedHashSet::new));
+        if (!oldExtraIds.equals(newExtraIds)) {
+            changed.add("extras");
+        }
+        return changed;
+    }
+
+    private String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private Map<Long, User> lockCoachesInOrder(Long oldCoachId, Long requestedCoachId, User actor, Long reservationId) {
+        List<Long> coachIds = new ArrayList<>();
+        if (oldCoachId != null) {
+            coachIds.add(oldCoachId);
+        }
+        if (requestedCoachId != null && !requestedCoachId.equals(oldCoachId)) {
+            coachIds.add(requestedCoachId);
+        }
+        Collections.sort(coachIds);
+        Map<Long, User> locked = new LinkedHashMap<>();
+        try {
+            for (Long coachId : coachIds) {
+                User coach = userRepository.lockById(coachId)
+                        .orElseThrow(() -> updateFail(actor, reservationId, "VALIDATION", "coachId", "That coach could not be found"));
+                locked.put(coachId, coach);
+            }
+        } catch (TransientDataAccessException ex) {
+            throw updateFail(actor, reservationId, "LOCK_TIMEOUT", "coachId", "That coach is no longer available for this time");
+        }
+        return locked;
+    }
+
+    private AssignedCoach resolveCoachLocked(
+            SportResource resource,
+            ReservationKind kind,
+            ReservationRequest request,
+            int hours,
+            User actor,
+            Long reservationId,
+            User coach
+    ) {
+        Long coachId = request.getCoachId();
+        if (coachId == null) {
+            return null;
+        }
+        if (kind == ReservationKind.LESSON) {
+            throw updateFail(actor, reservationId, "VALIDATION", "coachId", "A coach cannot be added to a group lesson");
+        }
+        if (coach == null) {
+            throw updateFail(actor, reservationId, "VALIDATION", "coachId", "That coach could not be found");
+        }
+        if (coach.getRole() != Role.COACH || !coach.isEnabled()) {
+            throw updateFail(actor, reservationId, "VALIDATION", "coachId", "That coach could not be found");
+        }
+        String level = request.getSkillLevel() == null ? "" : request.getSkillLevel().trim();
+        if (level.isEmpty()) {
+            throw updateFail(actor, reservationId, "VALIDATION", "skillLevel", "Choose your level for this sport");
+        }
+        if (!sportSkillLevelCatalog.isValid(resource.getType(), level)) {
+            throw updateFail(actor, reservationId, "VALIDATION", "skillLevel", "Choose a level that belongs to this sport");
+        }
+        CoachOffering offering = coachOfferingService.findByCoachAndSport(coach.getId(), resource.getType())
+                .orElseThrow(() -> updateFail(actor, reservationId, "VALIDATION", "coachId", "That coach does not teach this sport"));
+        if (!offering.covers(level)) {
+            throw updateFail(actor, reservationId, "VALIDATION", "coachId", "That coach does not teach this level");
+        }
+        BigDecimal fee = offering.getPricePerHour()
+                .multiply(BigDecimal.valueOf(hours))
+                .setScale(2, RoundingMode.HALF_UP);
+        return new AssignedCoach(coach, level, fee);
+    }
+
+    private int resolvePartySizeForUpdate(
+            SportResource resource,
+            ReservationRequest request,
+            ReservationKind kind,
+            User actor,
+            Long reservationId
+    ) {
+        if (kind == ReservationKind.LESSON && resource.requiresLessonPartySize()) {
+            Integer partySize = request.getPartySize();
+            if (partySize == null) {
+                throw updateFail(actor, reservationId, "VALIDATION", "partySize", "Choose how many people are coming");
+            }
+            int min = 2;
+            int max = resource.getCapacity();
+            if (partySize < min || partySize > max) {
+                throw updateFail(
+                        actor,
+                        reservationId,
+                        "VALIDATION",
+                        "partySize",
+                        "Party size must be between " + min + " and " + max
+                );
+            }
+            return partySize;
+        }
+        if (!resource.requiresPartySize()) {
+            return 1;
+        }
+        Integer partySize = request.getPartySize();
+        if (partySize == null) {
+            throw updateFail(actor, reservationId, "VALIDATION", "partySize", "Choose how many people are coming");
+        }
+        if (partySize < resource.getMinPartySize() || partySize > resource.getMaxPartySize()) {
+            throw updateFail(
+                    actor,
+                    reservationId,
+                    "VALIDATION",
+                    "partySize",
+                    "Party size must be between " + resource.getMinPartySize() + " and " + resource.getMaxPartySize()
+            );
+        }
+        return partySize;
+    }
+
+    private List<InventoryItem> resolveExtrasForUpdate(SportResource resource, List<Long> extraIds, User actor, Long reservationId) {
+        if (extraIds == null || extraIds.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, InventoryItem> unique = new LinkedHashMap<>();
+        for (Long extraId : extraIds) {
+            if (extraId == null || unique.containsKey(extraId)) {
+                continue;
+            }
+            InventoryItem item = inventoryItemRepository.findById(extraId)
+                    .orElseThrow(() -> updateFail(actor, reservationId, "VALIDATION", "extraIds", "That extra is not available"));
+            if (!item.isEnabled() || item.getResourceType() != resource.getType()) {
+                throw updateFail(actor, reservationId, "VALIDATION", "extraIds", "That extra is not available for this court");
+            }
+            unique.put(extraId, item);
+        }
+        return new ArrayList<>(unique.values());
+    }
+
+    private User applyBookingPhoneForUpdate(User user, ReservationRequest request, Long reservationId) {
+        boolean missing = user.getPhone() == null || user.getPhone().isBlank();
+        if (!missing) {
+            return user;
+        }
+        if (request.getPhone() == null || request.getPhone().isBlank()) {
+            throw updateFail(user, reservationId, "VALIDATION", "phone", "Phone is required to complete this booking");
+        }
+        String phone = request.getPhone().trim();
+        if (!PHONE.matcher(phone).matches()) {
+            throw updateFail(user, reservationId, "VALIDATION", "phone", "Enter a valid phone number");
+        }
+        return userService.updatePhone(user, phone);
+    }
+
+    private void notifyReservationUpdated(User occupant, Reservation saved, BigDecimal oldAmount, BigDecimal newAmount) {
+        String oldMoney = money(oldAmount);
+        String newMoney = money(newAmount);
+        String message;
+        if (oldAmount != null && newAmount != null && oldAmount.compareTo(newAmount) == 0) {
+            message = "Your reservation was updated. Amount remains " + newMoney + ".";
+        } else {
+            message = "Your reservation was updated. Amount changed from " + oldMoney + " to " + newMoney + ".";
+        }
+        notificationService.create(
+                occupant,
+                NotificationType.RESERVATION_UPDATED,
+                "Reservation updated",
+                message,
+                saved.getId()
+        );
+    }
+
+    private void notifyCoachesOfUpdate(
+            User oldCoach,
+            User newCoach,
+            LocalDateTime oldStart,
+            LocalDateTime oldEnd,
+            LocalDateTime newStart,
+            LocalDateTime newEnd,
+            Long reservationId,
+            User actor
+    ) {
+        Long oldId = oldCoach == null ? null : oldCoach.getId();
+        Long newId = newCoach == null ? null : newCoach.getId();
+        boolean sameCoach = oldId != null && oldId.equals(newId);
+        boolean timeChanged = !Objects.equals(oldStart, newStart) || !Objects.equals(oldEnd, newEnd);
+        if (sameCoach && timeChanged) {
+            notificationService.create(
+                    newCoach,
+                    NotificationType.COACH_SCHEDULE_CHANGED,
+                    "Booking time changed",
+                    "A booking you are assigned to moved from " + rangeLabel(oldStart, oldEnd)
+                            + " to " + rangeLabel(newStart, newEnd) + ".",
+                    reservationId
+            );
+            auditCoachNotice(actor, reservationId, "COACH_SCHEDULE_CHANGED", newId);
+            return;
+        }
+        if (oldCoach != null && !sameCoach) {
+            notificationService.create(
+                    oldCoach,
+                    NotificationType.COACH_REMOVED,
+                    "Removed from a booking",
+                    "You were removed from a booking on " + rangeLabel(oldStart, oldEnd)
+                            + " and are now available for that time.",
+                    reservationId
+            );
+            auditCoachNotice(actor, reservationId, "COACH_REMOVED", oldId);
+        }
+        if (newCoach != null && !sameCoach) {
+            notificationService.create(
+                    newCoach,
+                    NotificationType.COACH_ASSIGNED,
+                    "Assigned to a booking",
+                    "You were assigned to a booking on " + rangeLabel(newStart, newEnd) + ".",
+                    reservationId
+            );
+            auditCoachNotice(actor, reservationId, "COACH_ASSIGNED", newId);
+        }
+    }
+
+    private void auditCoachNotice(User actor, Long reservationId, String type, Long coachId) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("noticeType", type);
+        details.put("coachId", coachId);
+        auditLogService.record(actor, "COACH_NOTIFICATION", "RESERVATION", reservationId, "SUCCESS", details);
+    }
+
+    private String rangeLabel(LocalDateTime start, LocalDateTime end) {
+        if (start == null || end == null) {
+            return "the booked time";
+        }
+        return start.format(RANGE_TIME) + "-" + end.format(DateTimeFormatter.ofPattern("HH:mm"));
+    }
+
+    private String money(BigDecimal amount) {
+        BigDecimal value = amount == null ? BigDecimal.ZERO : amount;
+        return value.setScale(2, RoundingMode.HALF_UP).toPlainString() + " PLN";
+    }
+
+    private ReservationException updateFail(User actor, Long reservationId, String reason, String message) {
+        return updateFail(actor, reservationId, reason, "", message);
+    }
+
+    private ReservationException updateFail(User actor, Long reservationId, String reason, String field, String message) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("reason", reason);
+        if (fieldLooksLikeFormField(field)) {
+            details.put("field", field);
+        }
+        auditLogService.record(actor, "RESERVATION_UPDATE", "RESERVATION", reservationId, "REJECTED", details);
+        if (fieldLooksLikeFormField(field)) {
+            return new ReservationException(field, message);
+        }
+        return new ReservationException(message);
     }
 
     private ReservationException failEx(User actor, String reason, String message) {

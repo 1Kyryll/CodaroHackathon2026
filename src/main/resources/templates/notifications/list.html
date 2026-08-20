@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head th:replace="~{fragments/head :: head('Notices')}"></head>
+<body class="app-body">
+<div class="court-grid" aria-hidden="true"></div>
+<header th:replace="~{fragments/nav :: header}"></header>
+<main class="dashboard">
+    <div class="section-head">
+        <p class="eyebrow">Inbox</p>
+        <h1>Notices</h1>
+        <p>Updates about your bookings stay here, including amount changes and coach assignments.</p>
+    </div>
+    <div class="alert alert-success" th:if="${successMessage}" th:text="${successMessage}"></div>
+    <div class="alert alert-error" th:if="${errorMessage}" th:text="${errorMessage}"></div>
+    <form class="notice-toolbar" th:if="${notifications != null and !#lists.isEmpty(notifications)}" th:action="@{/notifications/read-all}" method="post">
+        <button class="btn btn-ghost" type="submit">Mark all as read</button>
+    </form>
+    <p class="lede" th:if="${notifications == null or #lists.isEmpty(notifications)}">No notices yet.</p>
+    <div class="notice-list">
+        <article class="notice-card" th:each="note : ${notifications}" th:classappend="${!note.read} ? ' is-unread'">
+            <div class="notice-main">
+                <p class="eyebrow" th:text="${note.type.name()}">RESERVATION_UPDATED</p>
+                <h3 th:text="${note.title}">Title</h3>
+                <p class="lede" th:text="${note.message}">Message</p>
+                <p class="meta-label" th:text="${#temporals.format(note.createdAtLocal, 'yyyy-MM-dd HH:mm')}">2026-08-20 10:00</p>
+            </div>
+            <form th:if="${!note.read}" th:action="@{/notifications/{id}/read(id=${note.id})}" method="post">
+                <button class="btn btn-ghost" type="submit">Mark as read</button>
+            </form>
+            <span class="meta-label" th:if="${note.read}">Read</span>
+        </article>
+    </div>
+</main>
+<footer th:replace="~{fragments/nav :: footer}"></footer>
+<script th:src="@{/js/app.js}"></script>
+</body>
+</html>
