@@ -12,7 +12,7 @@ import java.util.Objects;
 /**
  * Admits or rejects candidates. Hard constraints only — {@link Scorer} ranks
  * survivors, this class never does. Config-declared hard constraints are
- * matched purely by key/attribute lookup; the four built-in rules (capacity,
+ * matched purely by key/attribute lookup; the four built-in rules (party size,
  * inside opening/closing, strictly after now, no over-capacity overlap) are
  * always enforced regardless of config.
  */
@@ -23,7 +23,12 @@ final class ConstraintFilter {
 
     static boolean admits(Candidate c, ResourceSlice resource, ScheduleSnapshot snapshot,
                            IntentProperties config, List<String> activeHardKeys, int partySize) {
-        if (resource.capacity() < partySize) {
+        // Party size is a per-booking headcount, checked against the resource's
+        // own range — never against capacity, which counts concurrent occupancy
+        // units and is applied by the overlap rule below. A party SMALLER than
+        // the minimum is not a scheduling conflict (the booking is simply made
+        // at the minimum), so only an oversized party is rejected here.
+        if (partySize > resource.maxPartySize()) {
             return false;
         }
         if (c.start().toLocalTime().isBefore(resource.opening())) {

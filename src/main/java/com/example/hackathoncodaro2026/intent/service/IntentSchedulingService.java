@@ -143,6 +143,8 @@ public class IntentSchedulingService {
                 facilityName,
                 resource.getType().name(),
                 resource.getCapacity(),
+                resource.getMinPartySize(),
+                resource.getMaxPartySize(),
                 resource.getOpeningTime(),
                 resource.getClosingTime(),
                 resource.getSlotDurationMinutes(),
